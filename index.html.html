@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>LexiGlass — AI 智慧毛玻璃背單字</title>
+<style>
+  :root {
+    --bg-base: #eef2f7;
+    --glass-bg: rgba(255, 255, 255, 0.58);
+    --glass-bg-heavy: rgba(255, 255, 255, 0.78);
+    --glass-border: rgba(255, 255, 255, 0.65);
+    --glass-shadow: 0 12px 32px rgba(31, 38, 135, 0.08);
+    --text-primary: #1c1c1e;
+    --text-secondary: #636366;
+    --text-tertiary: #8e8e93;
+    --accent: #4f46e5;
+    --accent-soft: rgba(79, 70, 229, 0.12);
+    --teal: #0d9488;
+    --red: #e11d48;
+    --orange: #d97706;
+    --blue: #2563eb;
+    --green: #059669;
+    --radius-card: 28px;
+    --radius-pill: 999px;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang TC", "Noto Sans TC", sans-serif;
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    min-height: 100dvh;
+    overflow-x: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* 動態柔和光暈背景：讓毛玻璃產生真實折射層次 */
+  .ambient-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(75px);
+    opacity: 0.55;
+    animation: float 16s ease-in-out infinite alternate;
+  }
+  .orb-1 {
+    width: 360px;
+    height: 360px;
+    background: #818cf8;
+    top: -80px;
+    left: -60px;
+  }
+  .orb-2 {
+    width: 320px;
+    height: 320px;
+    background: #2dd4bf;
+    bottom: -60px;
+    right: -40px;
+    animation-delay: -5s;
+  }
+  .orb-3 {
+    width: 240px;
+    height: 240px;
+    background: #f472b6;
+    top: 42%;
+    left: 45%;
+    opacity: 0.25;
+    animation-delay: -10s;
+  }
+  @keyframes float {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(25px, -20px) scale(1.06); }
+  }
+
+  /* =========================================================
+     iPhone Duo 雙螢幕與摺疊適配規則 (Responsive Dual-Pane)
+     - 單螢幕/摺疊狀態 (< 740px): 單欄專注模式 + 底部/頂部抽屜清單
+     - 展開大螢幕/Duo 雙欄 (>= 740px): 左右雙欄分割，中間保留 24px 安全摺痕避讓區
+     ========================================================= */
+  .app-shell {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr;
+    height: 100dvh;
+    max-width: 1280px;
+    width: 100%;
+    margin: 0 auto;
+    padding: env(safe-area-inset-top, 12px) 16px env(safe-area-inset-bottom, 12px);
+    gap: 16px;
+  }
+
+  /* 模擬/實際 iPhone Duo 展開寬螢幕雙欄佈局，避開正中央摺痕區 */
+  @media (min-width: 740px) {
+    .app-shell {
+      grid-template-columns: 310px 1fr;
+      gap: 28px; /* 中央摺痕安全緩衝帶，不放置跨區互動元件 */
+      padding: 20px 24px;
+    }
+    .mobile-drawer-btn {
+      display: none !important;
+    }
+  }
+
+  /* 毛玻璃基礎類別 (Liquid Glass Material) */
+  .glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+
+  .glass-pill {
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(18px) saturate(180%);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+    border-radius: var(--radius-pill);
+    transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+    cursor: pointer;
+  }
+  .glass-pill:hover {
+    background: rgba(255, 255, 255, 0.88);
+    transform: translateY(-1px);
+  }
+  .glass-pill:active {
+    transform: scale(0.96);
+  }
+
+  /* 側邊欄：單字佇列 */
+  .sidebar {
+    border-radius: var(--radius-card);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+  }
+
+  @media (max-width: 739px) {
+    .sidebar {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      border-radius: 0;
+      transform: translateX(-100%);
+      transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+      background: rgba(245, 247, 251, 0.88);
+    }
+    .sidebar.open {
+      transform: translateX(0);
+    }
+  }
+
+  .sidebar-header {
+    padding: 20px 20px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  }
+  .brand {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .brand-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4f46e5, #0d9488);
+  }
+
+  .word-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .word-item {
+    padding: 12px 14px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    transition: background 0.18s ease;
+    border: 1px solid transparent;
+  }
+  .word-item:hover {
+    background: rgba(255, 255, 255, 0.5);
+  }
+  .word-item.active {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  }
+  .word-item-title {
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .word-item-sub {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 190px;
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* 主學習區 */
+  .main-stage {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-width: 600px;
+    width: 100%;
+    margin: 0 auto;
+    gap: 14px;
+  }
+
+  /* 頂部控制列 */
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-top: 4px;
+  }
+  .top-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pill-btn {
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pill-btn.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: transparent;
+  }
+  .pill-btn.primary:hover {
+    background: #4338ca;
+  }
+
+  /* 核心單字卡片（內容層：高可讀性毛玻璃） */
+  .flashcard {
+    flex: 1;
+    background: var(--glass-bg-heavy);
+    backdrop-filter: blur(28px) saturate(190%);
+    -webkit-backdrop-filter: blur(28px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.07);
+    border-radius: var(--radius-card);
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    cursor: pointer;
+    position: relative;
+    overflow-y: auto;
+    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .flashcard:active {
+    transform: scale(0.992);
+  }
+
+  .pos-tag {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 4px 12px;
+    border-radius: var(--radius-pill);
+    margin-bottom: 12px;
+  }
+  .word-display {
+    font-size: clamp(34px, 6vw, 46px);
+    font-weight: 700;
+    letter-spacing: -0.8px;
+    line-height: 1.15;
+  }
+  .phonetic-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    color: var(--text-secondary);
+    font-size: 16px;
+  }
+  .speak-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: background 0.15s;
+  }
+  .speak-btn:hover {
+    background: rgba(79, 70, 229, 0.15);
+    color: var(--accent);
+  }
+
+  .flip-hint {
+    margin-top: 28px;
+    font-size: 13px;
+    color: var(--text-tertiary);
+  }
+
+  /* 卡片背面解析與 AI 助記 */
+  .card-back {
+    width: 100%;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(0, 0, 0, 0.07);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    animation: fadeUp 0.28s ease forwards;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .meaning-text {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .ai-box {
+    text-align: left;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    border-radius: 18px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ai-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .ai-label.indigo { color: var(--accent); }
+  .ai-label.teal { color: var(--teal); }
+  .ai-content {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-primary);
+  }
+  .ai-trans {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  /* 底部評分操作列（避開中央摺痕，貼合底部安全區） */
+  .rating-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    padding-bottom: 4px;
+  }
+  .rate-btn {
+    padding: 14px 8px;
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+    border-radius: 20px;
+  }
+  .rate-again { color: var(--red); }
+  .rate-hard  { color: var(--orange); }
+  .rate-good  { color: var(--blue); }
+  .rate-easy  { color: var(--green); }
+
+  /* AI 生成視窗 Modal */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.25);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 60;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .modal-backdrop.open {
+    display: flex;
+  }
+  .modal-card {
+    width: 100%;
+    max-width: 420px;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(30px) saturate(200%);
+    -webkit-backdrop-filter: blur(30px) saturate(200%);
+    border: 1px solid #fff;
+    border-radius: 26px;
+    padding: 24px;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.14);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .modal-title {
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .modal-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+  .glass-input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    background: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+    outline: none;
+  }
+  .glass-input:focus {
+    border-color: var(--accent);
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  /* 隱藏輔助類別 */
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+  <div class="ambient-bg">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="app-shell">
+    <!-- 左側單字清單（Duo 展開時常駐顯示；窄螢幕時為抽屜） -->
+    <aside class="sidebar glass-panel" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <span>LexiGlass</span>
+        </div>
+        <button class="glass-pill pill-btn mobile-drawer-btn" onclick="toggleSidebar(false)">完成</button>
+      </div>
+      <div class="word-list" id="wordList"></div>
+    </aside>
+
+    <!-- 右側專注背單字舞台 -->
+    <main class="main-stage">
+      <header class="top-bar">
+        <div class="top-group">
+          <button class="glass-pill pill-btn mobile-drawer-btn" onclick="toggleSidebar(true)">
+            ☰ 單字庫 (<span id="countBadge">0</span>)
+          </button>
+          <button class="glass-pill pill-btn" id="toggleAiBtn" onclick="toggleAiHint()">
+            ✦ AI 助記：開
+          </button>
+        </div>
+
+        <button class="glass-pill pill-btn primary" onclick="openAiModal()">
+          + AI 智慧製卡
+        </button>
+      </header>
+
+      <!-- 核心毛玻璃單字卡 -->
+      <section class="flashcard" id="flashcard" onclick="flipCard()">
+        <span class="pos-tag" id="cardPos">adj.</span>
+        <h1 class="word-display" id="cardWord">Ephemeral</h1>
+        <div class="phonetic-row">
+          <span id="cardPhonetic">/ɪˈfem.ər.əl/</span>
+          <button class="speak-btn" title="聆聽發音" onclick="speakWord(event)">🔊</button>
+        </div>
+
+        <p class="flip-hint" id="flipHint">點擊卡片查看釋義與 AI 記憶聯想</p>
+
+        <div class="card-back hidden" id="cardBack">
+          <div class="meaning-text" id="cardMeaning">短暫的；轉瞬即逝的</div>
+          <div class="ai-box" id="aiBox">
+            <div>
+              <div class="ai-label indigo">✦ AI 詞根與諧音聯想</div>
+              <div class="ai-content" id="cardMnemonic"></div>
+            </div>
+            <div style="border-top: 1px solid rgba(0,0,0,0.06); padding-top: 8px;">
+              <div class="ai-label teal">❝ AI 語境例句</div>
+              <div class="ai-content" style="font-style: italic;" id="cardExample"></div>
+              <div class="ai-trans" id="cardExampleTrans"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 底部間隔重複評分膠囊 -->
+      <footer class="rating-bar">
+        <button class="glass-pill rate-btn rate-again" onclick="rateCard(-1)">重來</button>
+        <button class="glass-pill rate-btn rate-hard" onclick="rateCard(0)">模糊</button>
+        <button class="glass-pill rate-btn rate-good" onclick="rateCard(1)">記得</button>
+        <button class="glass-pill rate-btn rate-easy" onclick="rateCard(2)">秒懂</button>
+      </footer>
+    </main>
+  </div>
+
+  <!-- AI 智慧製卡彈窗 -->
+  <div class="modal-backdrop" id="aiModal" onclick="closeAiModal(event)">
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-title">✦ AI 智慧生成單字卡</div>
+      <div class="modal-desc">輸入想學習的單字或情境主題（例如：科技趨勢、商務談判、雅思核心），AI 將自動生成詞根助記與道地例句。</div>
+      <input type="text" class="glass-input" id="aiTopicInput" placeholder="輸入單字或主題，例如：Serendipity 或 科技新聞">
+      <div class="modal-actions">
+        <button class="glass-pill pill-btn" onclick="closeAiModal()">取消</button>
+        <button class="glass-pill pill-btn primary" id="generateBtn" onclick="generateAiCard()">立即生成</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // 內建精選單字庫
+  const vocabDeck = [
+    {
+      word: "Ephemeral",
+      phonetic: "/ɪˈfem.ər.əl/",
+      pos: "adj.",
+      meaning: "短暫的；朝生暮死的；轉瞬即逝的",
+      mnemonic: "拆解：epi（在…之上）+ hemera（一天）→ 生命只有一天的 → 轉瞬即逝的（聯想蜉蝣）。",
+      example: "Fame in the digital age is often intense yet ephemeral.",
+      exampleTrans: "數位時代的名聲往往來得猛烈，卻也轉瞬即逝。",
+      level: 0
+    },
+    {
+      word: "Serendipity",
+      phonetic: "/ˌser.ənˈdɪp.ə.ti/",
+      pos: "n.",
+      meaning: "意外發現珍奇事物的本領；機緣巧合",
+      mnemonic: "源自童話《錫蘭三王子》（The Three Princes of Serendip），他們總能意外發現沒在找的寶物。",
+      example: "Finding that quiet bookstore in Taipei was pure serendipity.",
+      exampleTrans: "在台北偶然發現那家安靜的書店純屬美麗的意外。",
+      level: 1
+    },
+    {
+      word: "Ubiquitous",
+      phonetic: "/juːˈbɪk.wɪ.təs/",
+      pos: "adj.",
+      meaning: "無所不在的；普遍存在的",
+      mnemonic: "諧音：「有必快吐司」→ 早餐店到處都有，吐司無所不在。",
+      example: "Smartphones have become ubiquitous in modern daily life.",
+      exampleTrans: "智慧型手機在現代日常生活中已變得無所不在。",
+      level: 2
+    },
+    {
+      word: "Resilient",
+      phonetic: "/rɪˈzɪl.jənt/",
+      pos: "adj.",
+      meaning: "有彈性的；能迅速恢復的；堅韌的",
+      mnemonic: "拆解：re（再次）+ salire（跳躍）→ 跌倒後能再次跳起來的 → 堅韌有彈性的。",
+      example: "Children are often remarkably resilient in the face of change.",
+      exampleTrans: "孩子在面對變化時，往往表現出驚人的適應力與韌性。",
+      level: 0
+    }
+  ];
+
+  // 預設 AI 生成資料庫（支援輸入關鍵字智慧匹配或即時生成）
+  const aiPresetPool = [
+    {
+      word: "Pragmatic",
+      phonetic: "/præɡˈmæt.ɪk/",
+      pos: "adj.",
+      meaning: "務實的；實用主義的；講求實效的",
+      mnemonic: "詞根 pragma（行動、事務）→ 只看實際行動與結果，不空談理論 → 務實的。",
+      example: "We need a pragmatic approach to solve this engineering bottleneck.",
+      exampleTrans: "我們需要一個務實的方法來解決這個工程瓶頸。",
+      level: 0
+    },
+    {
+      word: "Eloquent",
+      phonetic: "/ˈel.ə.kwənt/",
+      pos: "adj.",
+      meaning: "雄辯的；有說服力的；流利動人的",
+      mnemonic: "拆解：e（出）+ loqu（說話）→ 把話說到人心坎裡 → 雄辯且極具說服力的。",
+      example: "She gave an eloquent speech on sustainable design.",
+      exampleTrans: "她針對永續設計發表了一場極具說服力的演說。",
+      level: 0
+    },
+    {
+      word: "Meticulous",
+      phonetic: "/məˈtɪk.jə.ləs/",
+      pos: "adj.",
+      meaning: "一絲不苟的；極度細心的",
+      mnemonic: "聯想：做事情連每一個「微小的細節（micro）」都顧到 → 一絲不苟的。",
+      example: "The interface reflects meticulous attention to typography and spacing.",
+      exampleTrans: "這個介面展現了對字體排版與間距一絲不苟的講究。",
+      level: 0
+    }
+  ];
+
+  let currentIndex = 0;
+  let isFlipped = false;
+  let showAiHint = true;
+
+  function renderSidebar() {
+    const listEl = document.getElementById("wordList");
+    document.getElementById("countBadge").textContent = vocabDeck.length;
+    listEl.innerHTML = "";
+
+    vocabDeck.forEach((item, idx) => {
+      const div = document.createElement("div");
+      div.className = "word-item" + (idx === currentIndex ? " active" : "");
+      const color = item.level === 2 ? "var(--green)" : (item.level === 1 ? "var(--orange)" : "#cbd5e1");
+
+      div.innerHTML = `
+        <div>
+          <div class="word-item-title">${item.word}</div>
+          <div class="word-item-sub">${item.meaning}</div>
+        </div>
+        <span class="status-dot" style="background:${color}"></span>
+      `;
+      div.onclick = () => {
+        currentIndex = idx;
+        isFlipped = false;
+        renderCard();
+        renderSidebar();
+        toggleSidebar(false);
+      };
+      listEl.appendChild(div);
+    });
+  }
+
+  function renderCard() {
+    const card = vocabDeck[currentIndex];
+    document.getElementById("cardPos").textContent = card.pos;
+    document.getElementById("cardWord").textContent = card.word;
+    document.getElementById("cardPhonetic").textContent = card.phonetic;
+    document.getElementById("cardMeaning").textContent = card.meaning;
+    document.getElementById("cardMnemonic").textContent = card.mnemonic;
+    document.getElementById("cardExample").textContent = card.example;
+    document.getElementById("cardExampleTrans").textContent = card.exampleTrans;
+
+    const backEl = document.getElementById("cardBack");
+    const hintEl = document.getElementById("flipHint");
+    const aiBoxEl = document.getElementById("aiBox");
+
+    if (isFlipped) {
+      backEl.classList.remove("hidden");
+      hintEl.classList.add("hidden");
+    } else {
+      backEl.classList.add("hidden");
+      hintEl.classList.remove("hidden");
+    }
+
+    aiBoxEl.style.display = showAiHint ? "flex" : "none";
+  }
+
+  function flipCard() {
+    isFlipped = !isFlipped;
+    renderCard();
+  }
+
+  function toggleAiHint() {
+    showAiHint = !showAiHint;
+    document.getElementById("toggleAiBtn").textContent = showAiHint ? "✦ AI 助記：開" : "✦ AI 助記：關";
+    renderCard();
+  }
+
+  function rateCard(delta) {
+    const card = vocabDeck[currentIndex];
+    card.level = Math.max(0, Math.min(2, card.level + delta));
+    currentIndex = (currentIndex + 1) % vocabDeck.length;
+    isFlipped = false;
+    renderCard();
+    renderSidebar();
+  }
+
+  function speakWord(e) {
+    e.stopPropagation();
+    const word = vocabDeck[currentIndex].word;
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(word);
+      utter.lang = "en-US";
+      utter.rate = 0.92;
+      window.speechSynthesis.speak(utter);
+    }
+  }
+
+  function toggleSidebar(open) {
+    const sidebar = document.getElementById("sidebar");
+    if (open) sidebar.classList.add("open");
+    else sidebar.classList.remove("open");
+  }
+
+  function openAiModal() {
+    document.getElementById("aiModal").classList.add("open");
+    document.getElementById("aiTopicInput").focus();
+  }
+
+  function closeAiModal() {
+    document.getElementById("aiModal").classList.remove("open");
+  }
+
+  function generateAiCard() {
+    const inputEl = document.getElementById("aiTopicInput");
+    const btnEl = document.getElementById("generateBtn");
+    const raw = inputEl.value.trim();
+    if (!raw) return;
+
+    btnEl.textContent = "AI 生成中...";
+    btnEl.disabled = true;
+
+    setTimeout(() => {
+      // 若使用者直接輸入英文單字，則動態為該單字建立專屬記憶卡；否則從精選 AI 詞庫提取
+      const isEnglishWord = /^[a-zA-Z\s-]+$/.test(raw);
+      let newCard;
+
+      if (isEnglishWord) {
+        const formatted = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+        newCard = {
+          word: formatted,
+          phonetic: "/ˈkʌs.təm.wɜːd/",
+          pos: "vocab.",
+          meaning: `「${formatted}」的 AI 智慧解析釋義`,
+          mnemonic: `AI 聯想策略：將「${formatted}」拆解為熟悉音節，並結合日常高頻場景畫面記憶。`,
+          example: `Mastering "${formatted}" makes your expression far more precise.`,
+          exampleTrans: `掌握「${formatted}」能讓你的表達更加精準道地。`,
+          level: 0
+        };
+      } else {
+        const pick = aiPresetPool.shift() || {
+          word: "Synthesis",
+          phonetic: "/ˈsɪn.θə.sɪs/",
+          pos: "n.",
+          meaning: "綜合；合成；整合",
+          mnemonic: "拆解：syn（共同）+ thesis（放置）→ 把不同元素放在一起 → 綜合、整合。",
+          example: "Great design is a synthesis of clarity and emotion.",
+          exampleTrans: "優秀的設計是清晰度與情感的完美融合。",
+          level: 0
+        };
+        aiPresetPool.push(pick);
+        newCard = { ...pick };
+      }
+
+      vocabDeck.unshift(newCard);
+      currentIndex = 0;
+      isFlipped = true;
+      inputEl.value = "";
+      btnEl.textContent = "立即生成";
+      btnEl.disabled = false;
+
+      closeAiModal();
+      renderSidebar();
+      renderCard();
+    }, 450);
+  }
+
+  // 初始化
+  renderSidebar();
+  renderCard();
+</script>
+</body>
+</html>
